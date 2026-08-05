@@ -1,0 +1,10 @@
+hl.on("hyprland.start", function()
+    hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP")
+end)
+
+hl.window_rule({ match = { class = "^(xwaylandvideobridge)$" }, opacity = "0.0 override" })
+hl.window_rule({ match = { class = "^(xwaylandvideobridge)$" }, no_anim = true })
+hl.window_rule({ match = { class = "^(xwaylandvideobridge)$" }, no_initial_focus = true })
+hl.window_rule({ match = { class = "^(xwaylandvideobridge)$" }, max_size = { 1, 1 } })
+hl.window_rule({ match = { class = "^(xwaylandvideobridge)$" }, no_blur = true })
+hl.window_rule({ match = { class = "^(xwaylandvideobridge)$" }, no_focus = true })

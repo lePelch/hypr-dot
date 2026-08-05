@@ -1,0 +1,2 @@
+-- Original hyprlang line preserved for reference:
+-- env GDK_BACKEND=x11 /opt/cisco/secureclient/bin/vpnui

@@ -1,0 +1,8 @@
+hl.on("hyprland.start", function()
+    hl.exec_cmd("swaync")
+    hl.exec_cmd("/home/ced/.config/hypr/xdph.sh")
+    hl.exec_cmd("waybar")
+    hl.exec_cmd("systemctl --user start hyprpolkitagent")
+    hl.exec_cmd("hyprpaper")
+    hl.exec_cmd("hyprlauncher -d")
+end)
