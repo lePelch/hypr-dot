@@ -16,7 +16,7 @@ require("app/cisco")
 require("app/sumatra")
 require("app/pavucontrol")
 require("app/discord")
-require("app/pypaper")
+require("app/waypaper")
 require("app/android-studio")
 require("app/winapps")
 
