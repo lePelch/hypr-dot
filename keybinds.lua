@@ -21,7 +21,7 @@ hl.bind(vars.mainMod .. " + down", hl.dsp.focus({ direction = "d" }))
 for workspace = 1, 10 do
     local key = workspace % 10
 
-    hl.bind(vars.mainMod .. " + " .. key, hl.dsp.focus({ workspace = workspace }))
+    hl.bind(vars.mainMod .. " + " .. key, hl.dsp.focus({ workspace = workspace }), { dont_inhibit = true })
     hl.bind(vars.mainMod .. " + SHIFT + " .. key, hl.dsp.window.move({ workspace = workspace }))
 end
 
