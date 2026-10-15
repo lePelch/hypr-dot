@@ -8,9 +8,10 @@ local vars = {
 	editor = "nvim",
 	visual = "nvim",
 	wlrRenderer = "vulkan",
+	color_picker = "hyprpicker -a",
 
-	monitor_1 = "eDP-1",
-	monitor_2 = "DP-6",
+	monitor_1 = "DP-3",
+	monitor_2 = "eDP-1",
 	monitor_3 = "DP-7",
 }
 
