@@ -1,6 +1,12 @@
 local vars = require("vars")
 
 hl.bind(vars.mainMod .. " + S", hl.dsp.exec_cmd("grimblast copy area"))
+hl.bind(vars.mainMod .. " + T", hl.dsp.exec_cmd([[bash -o pipefail -c '
+	geometry=$(slurp) || exit 0
+	text=$(grim -g "$geometry" - | tesseract stdin stdout -l fra+eng) || exit 1
+	[ -n "$text" ] || exit 0
+	printf "%s" "$text" | wl-copy
+']]))
 
 hl.bind(vars.mainMod .. " + Q", hl.dsp.exec_cmd(vars.terminal))
 hl.bind(vars.mainMod .. " + N", hl.dsp.exec_cmd(vars.calc))
