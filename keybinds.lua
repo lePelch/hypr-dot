@@ -1,4 +1,5 @@
 local vars = require("vars")
+local workspace_store = require("workspace_store")
 
 hl.bind(vars.mainMod .. " + S", hl.dsp.exec_cmd("grimblast copy area"))
 hl.bind(
@@ -33,15 +34,29 @@ hl.bind(vars.mainMod .. " + right", hl.dsp.focus({ direction = "r" }))
 hl.bind(vars.mainMod .. " + up", hl.dsp.focus({ direction = "u" }))
 hl.bind(vars.mainMod .. " + down", hl.dsp.focus({ direction = "d" }))
 
+hl.bind(vars.mainMod .. " + A", function()
+	workspace_store.push()
+end)
+hl.bind(vars.mainMod .. " + D", function()
+	workspace_store.pop()
+end)
+
 for workspace = 1, 10 do
 	local key = workspace % 10
 
 	hl.bind(vars.mainMod .. " + " .. key, hl.dsp.focus({ workspace = workspace }), { dont_inhibit = true })
 	hl.bind(vars.mainMod .. " + SHIFT + " .. key, hl.dsp.window.move({ workspace = workspace }))
+	hl.bind(vars.mainMod .. " + CTRL + " .. key, function()
+		workspace_store.pop(key)
+	end)
 end
 
-hl.bind(vars.mainMod .. " + mouse_down", hl.dsp.focus({ workspace = "e+1" }))
-hl.bind(vars.mainMod .. " + mouse_up", hl.dsp.focus({ workspace = "e-1" }))
+hl.bind(vars.mainMod .. " + mouse_down", function()
+	workspace_store.cycle(1)
+end)
+hl.bind(vars.mainMod .. " + mouse_up", function()
+	workspace_store.cycle(-1)
+end)
 
 hl.bind(vars.mainMod .. " + mouse:272", hl.dsp.window.drag(), { mouse = true })
 hl.bind(vars.mainMod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
