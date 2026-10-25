@@ -19,6 +19,7 @@ require("app/discord")
 require("app/pypaper")
 require("app/android-studio")
 require("app/winapps")
+require("app/chatgpt-pet")
 
 hl.window_rule({
     match = { class = ".*" },
