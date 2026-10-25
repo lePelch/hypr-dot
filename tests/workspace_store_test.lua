@@ -10,7 +10,7 @@ local function equal(actual, expected)
 end
 
 local function fixture()
-	local state = { workspaces = {}, monitors = {}, notifications = {}, calls = {} }
+	local state = { workspaces = {}, monitors = {}, notifications = {}, calls = {}, timers = {}, events = {}, captures = {}, serial = 0, window_serial = 0, ipc = {} }
 	for _, name in ipairs({ "eDP-1", "DP-6", "DP-7" }) do
 		state.monitors[name] = { name = name }
 	end
@@ -26,12 +26,19 @@ local function fixture()
 	end
 
 	function state.add(id, label, monitor, name)
+  state.window_serial = state.window_serial + 1
+		local stable_id = state.window_serial
 		local workspace = setmetatable({
 			id = id,
 			name = name or tostring(id),
 			monitor = monitor or (id <= 10 and bound_monitor(id) or state.monitor),
 			windows = label and 1 or 0,
 			layout = { label = label },
+   get_windows = function(self)
+    local windows = {}
+    for index = 1, self.windows do table.insert(windows, { stable_id = stable_id * 100 + index }) end
+    return windows
+   end,
 		}, {
 			__index = function(self, key)
 				if key == "is_empty" then
@@ -69,6 +76,21 @@ local function fixture()
 		get_active_monitor = function()
 			return state.monitor
 		end,
+  get_monitor = function(name) return state.monitors[name] end,
+  exec_cmd = function(command)
+   local token = command:match("'capture' '[^']+' '(%x+)'")
+   assert(token, command)
+   table.insert(state.captures, { token = token, command = command })
+  end,
+  timer = function(callback, options)
+   equal(options.timeout, 8000)
+   equal(options.type, "oneshot")
+   local timer = { enabled = true, callback = callback }
+   function timer:set_enabled(value) self.enabled = value end
+   table.insert(state.timers, timer)
+   return timer
+  end,
+  on = function(event, callback) state.events[event] = callback end,
 		get_workspace = function(id)
 			return state.workspaces[id]
 		end,
@@ -83,6 +105,7 @@ local function fixture()
 			table.insert(state.notifications, spec.text)
 		end },
 		dsp = {
+   event = function(data) return { kind = "event", data = data } end,
 			focus = factory("focus"),
 			workspace = {
 				change_id = factory("change_id"),
@@ -93,6 +116,7 @@ local function fixture()
 	}
 
 	function api.dispatch(action)
+  if action.kind == "event" then table.insert(state.ipc, action.data); return { ok = true } end
 		table.insert(state.calls, action)
 		if state.fail and state.fail(action) then
 			state.fail = nil
@@ -128,7 +152,30 @@ local function fixture()
 	end
 
 	function state.reload()
-		state.store = assert(loadfile("workspace_store.lua", "t", setmetatable({ hl = api }, { __index = _G })))()
+  state.events = {}
+  state.raw = assert(loadfile("workspace_store.lua", "t", setmetatable({
+   hl = api,
+   os = { getenv = function(key)
+    if key == "HYPRLAND_INSTANCE_SIGNATURE" then return "test-session" end
+    if key == "HOME" then return "/home/test" end
+   end },
+   io = { open = function(path)
+    equal(path, "/proc/sys/kernel/random/uuid")
+    state.serial = state.serial + 1
+    return { read = function() return string.format("%032x", state.serial) end, close = function() end }
+   end },
+  }, { __index = _G })))()
+  -- Original transactional tests complete the mocked asynchronous capture.
+  -- Dedicated tests below use raw.push/pop to inspect the in-flight phase.
+  state.store = setmetatable({}, { __index = state.raw })
+  for _, method in ipairs({ "push", "pop", "pop_entry" }) do
+   state.store[method] = function(...)
+    local token = state.raw[method](...)
+    if type(token) ~= "string" then return token end
+    if state.raw.result(token) == "pending" then state.raw.complete(token, true) end
+    return state.raw.result(token) == "ok"
+   end
+  end
 	end
 
 	function state.queue()
@@ -444,6 +491,140 @@ test("all keybindings map digits to the correct zero-based store index", functio
 	equal(calls[#calls][2], 1)
 	bindings["SUPER + mouse_up"]()
 	equal(calls[#calls][2], -1)
+end)
+
+test("capture precedes every push mutation and failed captures use a unique fallback identity", function()
+ local s = fixture()
+ local original = s.workspaces[1]
+ local token = s.raw.push()
+ equal(#s.calls, 0)
+ equal(s.workspaces[1], original)
+ equal(#s.captures, 1)
+ equal(s.ipc[1], "workspace-store:begin:" .. token)
+ equal(s.raw.result(token), "pending")
+ assert(s.raw.valid(token))
+ equal(s.raw.complete(token, false), "ok")
+ equal(s.raw.result(token), "ok")
+ equal(s.ipc[#s.ipc], "workspace-store:end:" .. token)
+ equal(original.name, "workspace-store:1000:test-session:" .. token)
+ s.timers[1].callback() -- a completed operation's watchdog is harmless
+ equal(s.raw.result(token), "ok")
+end)
+
+test("pop captures outgoing content before parking and freezes the selected entry", function()
+ local s = fixture()
+ local selected = s.stored(1000, "A")
+ local token = s.raw.pop(0)
+ equal(#s.calls, 0)
+ equal(s.queue(), "A")
+ equal(#s.captures, 1)
+ s.stored(1001, "B") -- the selected entry must not drift to a new index
+ equal(s.raw.complete(token, true), "ok")
+ equal(s.monitor.active_workspace, selected)
+ equal(s.queue(), "B,X")
+ equal(s.store.entries()[2].name, "workspace-store:1002:test-session:" .. token)
+end)
+
+test("empty pop destinations require no screenshot", function()
+ local s = fixture()
+ s.workspaces[1].windows = 0
+ s.stored(1000, "A")
+ local token = s.raw.pop()
+ equal(s.raw.result(token), "ok")
+ equal(#s.captures, 0)
+end)
+
+test("concurrent bar/keyboard operations are serialized", function()
+ local s = fixture()
+ s.stored(1000, "A")
+ local token = s.raw.push()
+ assert(not s.raw.push())
+ assert(not s.raw.pop())
+ equal(#s.captures, 1)
+ equal(s.raw.complete(token, true), "ok")
+end)
+
+for _, change in ipairs({ "source", "source-id-reuse", "windows", "special", "selected", "selected-id-reuse", "selected-monitor", "switch-back" }) do
+ test("capture aborts without parking after change to " .. change, function()
+  local s = fixture()
+  local original = s.workspaces[1]
+  local selected = s.stored(1000, "A")
+  local token = s.raw.pop()
+  if change == "source" then
+   s.activate(s.add(2, "other"))
+  elseif change == "source-id-reuse" then
+   s.activate(s.add(1, "replacement"))
+  elseif change == "windows" then
+   original.windows = 2
+  elseif change == "special" then
+   s.monitor.active_special_workspace = { id = -99 }
+  elseif change == "selected" then
+   s.workspaces[1000] = nil
+  elseif change == "selected-id-reuse" then
+   s.stored(1000, "replacement")
+  elseif change == "selected-monitor" then
+   selected.monitor = s.monitors["DP-6"]
+  else
+   s.events["workspace.active"]() -- switch away and back, same final identity
+  end
+  assert(not s.raw.valid(token))
+  assert(s.raw.complete(token, true):match("^error:"))
+  equal(original.id, 1)
+  equal(#s.calls, 0)
+ end)
+end
+
+test("bar operations address their own monitor, without falling back to the focused one", function()
+ local s = fixture()
+ local other = s.add(4, "other", s.monitors["DP-6"])
+ s.monitors["DP-6"].active_workspace = other
+ assert(not s.raw.push("unplugged"))
+ assert(not s.raw.push("DP-6", 5)) -- source switched before the request arrived
+ local token = s.raw.push("DP-6")
+ assert(s.raw.valid(token))
+ assert(s.captures[1].command:find("'DP%-6' '4'"))
+ equal(s.raw.complete(token, true), "ok")
+ equal(s.workspaces[1].layout.label, "X")
+ equal(s.queue(), "other")
+end)
+
+test("reused workspace IDs get different image identities and stale callbacks cannot finish a new request", function()
+ local s = fixture()
+ assert(s.store.push())
+ local first_name = s.store.entries()[1].name
+ local first_token = s.captures[1].token
+ assert(s.store.pop())
+ local token = s.raw.push()
+ s.timers[1].callback() -- the previous capture's watchdog cannot abort this one
+ equal(s.raw.result(token), "pending")
+ equal(s.raw.complete(first_token, true), "unknown")
+ equal(s.workspaces[1].layout.label, "X")
+ equal(s.raw.complete(token, true), "ok")
+ equal(s.store.entries()[1].id, 1000)
+ assert(s.store.entries()[1].name ~= first_name)
+end)
+
+test("timeouts and config reloads never move workspaces before capture completion", function()
+ local s = fixture()
+ local token = s.raw.push()
+ s.timers[1].callback()
+ equal(s.raw.result(token), "error:capture expirée")
+ equal(s.raw.complete(token, true), "unknown")
+ equal(#s.calls, 0)
+ local second = s.raw.push()
+ s.reload()
+ equal(s.raw.complete(second, true), "unknown")
+ equal(s.workspaces[1].id, 1)
+end)
+
+test("UI retrieval uses full identity rather than an obsolete queue index", function()
+ local s = fixture()
+ local selected = s.stored(1001, "B")
+ local name = selected.name
+ s.stored(1000, "A")
+ assert(s.store.pop_entry(name, "eDP-1"))
+ equal(s.monitor.active_workspace, selected)
+ assert(not s.raw.pop_entry(name, "eDP-1"))
 end)
 
 local failures = 0
